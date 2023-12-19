@@ -1,7 +1,9 @@
 import time
 from telethon import TelegramClient, types
+from telethon.tl.functions.channels import JoinChannelRequest
 from pystyle import Colorate, Colors, Col
 import sys
+import os
 from datetime import datetime
 import random
 import asyncio
@@ -14,9 +16,8 @@ N4ME = "Telegram AutoPUB"
 CONFIG_ACCOUNT_FILE = "config/account.txt"
 CONFIG_CHANNELS_FILE = "config/channels.txt"
 CONFIG_GROUPS_FILE = "config/groups.txt"
-CONFIG_PUB_FILE = "config/pub.txt"
 EMOJI_MAPPING = "config/emojis_mapping.txt"
-
+CONFIG_PUB_DIR = "config/pubs"
 # Banner display
 def display_banner():
 	banner = '''
@@ -38,12 +39,13 @@ def load_config():
 			for line in lines:
 				if '=' in line:
 					splitted = line.split('=')
-					if splitted[0] == 'api_id ':
-						api_id = splitted[1]
-					elif splitted[0] == 'api_hash ':
-						api_hash = splitted[1]
+					if 'api_id' in splitted[0]:
+						api_id = splitted[1].strip()
+					elif 'api_hash' in splitted[0]:
+						api_hash = splitted[1].strip()
 					else:
 						pass
+		print(f"ID {api_id} - HASH {api_hash}")
 		return api_id, api_hash
 	except IOError:
 		return None, None
@@ -99,15 +101,24 @@ def load_groups():
 
 # Message retrieval
 def get_message():
+	random.seed(time.time())
 	try:
-		with open(CONFIG_PUB_FILE, "r", encoding="utf8") as file:
+		# List all .txt files in the directory
+		files = [f for f in os.listdir(CONFIG_PUB_DIR) if f.endswith('.txt')]
+		if not files:
+			return ""
+		
+		# Select a random file
+		selected_file = random.choice(files)
+		
+		# Read and return the content of the selected file
+		with open(os.path.join(CONFIG_PUB_DIR, selected_file), "r", encoding="utf8") as file:
 			return file.read()
 	except IOError:
 		return ""
 
 # Publication function
-async def publish(message, client, entities, total_time):
-
+async def publish(client, entities, total_time):
 	n = len(entities)
 	if n == 0:
 		return
@@ -128,6 +139,9 @@ async def publish(message, client, entities, total_time):
 		start_time = time.time()
 		good, bad = 0, 0
 		for channel in entities:
+			# Get a new random message for each entity
+			message = get_message()
+
 			elapsed_time = time.time() - start_time
 			remaining_time = max(total_time - elapsed_time, 0)
 			entities_left = n - good - bad
@@ -184,8 +198,6 @@ async def main():
 
 		if command == ".exit":
 			break
-		elif command == ".message":
-			handle_message_command()
 		elif command == ".account":
 			handle_account_command(api_id, api_hash)
 		elif command == '.channels':
@@ -194,6 +206,8 @@ async def main():
 			await handle_groups_command(client)
 		elif command.startswith(".pub "):
 			await handle_publish_command(command, client)
+		elif command == ".join":
+			await join_groups_channels(client)
 		elif command == ".help":
 			display_help()
 
@@ -201,12 +215,6 @@ def print_error(message):
 	print(f"\n{COLA}╔{Col.reset} {Col.cyan}{N4ME}{Col.reset} {COLA}${Col.reset}")
 	print(f"{COLA}╚{Col.reset} {message}{COLA}.{Col.reset}")
 
-def handle_message_command():
-	message = get_message()
-	if not message:
-		print_error("Could not open config/pub.txt to get Message")
-	else:
-		print(f"\n{COLA}[{Col.reset}*{COLA}]{Col.reset} Saved Message: \n{message}")
 
 def handle_account_command(api_id, api_hash):
 	print(f"\n{COLA}[{Col.reset}*{COLA}]{Col.reset} Saved Account:")
@@ -236,17 +244,12 @@ async def handle_publish_command(command, client):
 		print_error(f"Could not open config/{target_type}.txt to get IDs")
 		return
 
-	message = get_message()
-	if not message:
-		print_error("Could not open config/pub.txt to get Message")
-		return
-
 	print(f"\n{COLA}╔{Col.reset} {Col.cyan}{N4ME}{Col.reset} {COLA}${Col.reset}")
 	print(f"{COLA}║{Col.reset} Bot is ready. Target: {target_type.capitalize()} | Entities: {len(entities)} | Total Time: {total_time}s")
 	print(f"{COLA}╚{Col.reset} Press Enter to start{COLA}.{Col.reset} \n")
 	input()
 
-	await publish(message, client, entities, total_time)
+	await publish(client, entities, total_time)
 
 # Construct Telegram link
 def construct_telegram_link(dialog):
@@ -291,12 +294,63 @@ def find_emojis(message, emoji_dict):
 			start = pos + len(emoji)
 	return entities
 
+
+
+###############
+
+
+import asyncio
+
+async def join_groups_channels(client):
+    tojoin_file = "config/tojoin.txt"
+    channels_file = CONFIG_CHANNELS_FILE
+    groups_file = CONFIG_GROUPS_FILE
+    rate_limit_wait = 191  # Adjust this based on the error message
+
+    try:
+        with open(tojoin_file, "r") as file:
+            links = [line.strip() for line in file if line.strip()]
+
+        for link in links:
+            try:
+                await client(JoinChannelRequest(link))
+                entity = await client.get_entity(link)
+                print(f"Joined {link}")
+
+                if getattr(entity, 'megagroup', False):
+                    write_to_file(groups_file, entity)
+                else:
+                    write_to_file(channels_file, entity)
+
+                links.remove(link)
+                await asyncio.sleep(rate_limit_wait)  # Wait to avoid rate limit
+
+            except Exception as e:
+                print(f"Could not join {link}: {e}")
+                await asyncio.sleep(rate_limit_wait)  # Wait and retry
+
+        # Update the tojoin.txt file
+        with open(tojoin_file, "w") as file:
+            file.writelines(link + '\n' for link in links)
+
+    except IOError:
+        print("Error reading or writing to the join list file.")
+
+
+def write_to_file(file_path, entity):
+	try:
+		with open(file_path, "a") as file:
+			link = construct_telegram_link(entity)
+			file.write(f'{entity.id} - {entity.title} - {link}\n')
+	except Exception as e:
+		print(f"Error writing to {file_path}: {e}")
+
+
 def display_help():
 	print('''
 	HELP COMMANDS
 	-------------
 
-	.message    | see saved message
 	.account    | see saved account
 	.channels   | load channels and save them
 	.groups		| load groups and save them
