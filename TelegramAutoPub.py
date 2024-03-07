@@ -1,362 +1,233 @@
+import json
+import re
 import time
-from telethon import TelegramClient, types
-from telethon.tl.functions.channels import JoinChannelRequest
-from pystyle import Colorate, Colors, Col
-import sys
-import os
-from datetime import datetime
 import random
 import asyncio
+from telethon import TelegramClient, types
+from telethon.tl.functions.channels import JoinChannelRequest
 
-# a = TelegramClient()
-# a.send_message(parse_mode=)
-# Constants
-COLA = Col.light_blue
-N4ME = "Telegram AutoPUB"
-CONFIG_ACCOUNT_FILE = "config/account.txt"
-CONFIG_CHANNELS_FILE = "config/channels.txt"
-CONFIG_GROUPS_FILE = "config/groups.txt"
-EMOJI_MAPPING = "config/emojis_mapping.txt"
-CONFIG_PUB_DIR = "config/pubs"
-# Banner display
-def display_banner():
-	banner = '''
-		[Your ASCII Art Banner Here]
+class Spammer:
+	MAX_MESSAGES_PER_MINUTE = 10
+	RATE_LIMIT_DELAY = 60
+	MIN_DELAY = 0.1 # Min delay is 10% of the average
+	MAX_DELAY = 1.9 # Max delay is 190% of the average
+
+	HELP_MESSAGE = '''
+	HELP COMMANDS
+	_____________
+
+	.channels	| load channels and save them
+	.groups		| load groups and save them
+	.pub		| start the bot
+	.reload		| reload the config
+	.help		| show this message 
+	.exit		| exit the program		
 	'''
-	print(Colorate.Vertical(Colors.cyan_to_blue, banner))
 
-# Input prompt
-def get_input(prompt=''):
-	print(f"\n{COLA}╔{Col.reset} {Col.cyan}{N4ME}{Col.reset} {COLA}${Col.reset}")
-	return input(f"{COLA}╚{Col.reset} root@root {COLA}>>{Col.reset} ")
+	
+	@classmethod
+	async def init(self, config_path):
+		instance = self()
+		await instance._async_init(config_path)
+		return instance
+	
+	async def _async_init(self, config_path):
+		self.config_path = config_path
+		await self._load_config(config_path)
+		print(self.config)
+		self.client = TelegramClient(self.config['phone'], api_id=self.config['api_id'], api_hash=self.config['api_hash'])
+		await self.client.start()
+		await self._load_messages()
 
-# Configuration loading
-def load_config():
-	api_id, api_hash = None, None
-	try:
-		with open(CONFIG_ACCOUNT_FILE, "r") as file:
-			lines = file.readlines()
-			for line in lines:
-				if '=' in line:
-					splitted = line.split('=')
-					if 'api_id' in splitted[0]:
-						api_id = splitted[1].strip()
-					elif 'api_hash' in splitted[0]:
-						api_hash = splitted[1].strip()
-					else:
-						pass
-		print(f"ID {api_id} - HASH {api_hash}")
-		return api_id, api_hash
-	except IOError:
-		return None, None
+		# await self.client.connect()
+		# if not await self.client.is_user_authorized():
+		# 	await self.client.send_code_request(self.config['phone'])
+		# 	await self.client.sign_in(self.config['phone'], code=input('Enter  veryfication code: '), password=input('Enter password : '))
 
-# Channel retrieval
-def get_channels(client):
-	try:
-		with open(CONFIG_CHANNELS_FILE, "a", encoding="utf8") as file:
-			for dialog in client.iter_dialogs():
-				if dialog.is_channel:
-					link = construct_telegram_link(dialog)
-					print_channel_group_info(dialog, link)
-					file.write(f'{dialog.id} - {dialog.title} - {link}\n')
-		return True
-	except IOError:
-		return False
+	async def _load_config(self, config_path):
+		self.config = []
+		with open(config_path, 'r') as f:
+			self.config = json.load(f)
 
-# Group retrieval
-async def get_groups(client):
-	try:
-		with open("config/groups.txt", "a", encoding="utf8") as file:
-			async for dialog in client.iter_dialogs():
-				if dialog.is_group:
-					link = construct_telegram_link(dialog)
-					print_channel_group_info(dialog, link)
-					file.write(f'{dialog.id} - {dialog.title} - {link}\n')
-		return True
-	except IOError:
-		return False
-
-# Channel loading
-def load_channels():
-	try:
-		channels = []
-		with open(CONFIG_CHANNELS_FILE, "r", encoding='utf8') as file:
-			lines = file.readlines()
-			for line in lines:
-				channels.append(line.split(' - ')[0].strip())
-			return channels
-	except IOError:
-		return []
-
-def load_groups():
-	try:
-		groups = []
-		with open(CONFIG_GROUPS_FILE, "r", encoding='utf8') as file:
-			lines = file.readlines()
-			for line in lines:
-				groups.append(line.split(' - ')[0].strip())
-			return groups
-	except IOError:
-		return []
-
-# Message retrieval
-def get_message():
-	random.seed(time.time())
-	try:
-		# List all .txt files in the directory
-		files = [f for f in os.listdir(CONFIG_PUB_DIR) if f.endswith('.txt')]
-		if not files:
-			return ""
+	
+	async def _load_groups(self):
+		try:
+			groups = []
+			with open(self.config['groups_path'], 'r', encoding='utf8') as f:
+				lines = f.readlines()
+				for line in lines:
+					line = line.split(' - ')[0].strip()
+					print(line)
+					try:
+						entity = await self.client.get_entity(int(line))
+					except Exception as e:
+						self._logger(f"Could not load {line} : {e}")
+					groups.append(entity)
+				return groups
+		except:
+			return []
 		
-		# Select a random file
-		selected_file = random.choice(files)
+	async def _load_channels(self):
+		try:
+			channels = []
+			with open(self.config['groups_path'], 'r', encoding='utf8') as f:
+				lines = f.readlines()
+				for line in lines:
+					channels.append(line.split(' - ')[0].strip())
+				return channels
+		except:
+			return []
 		
-		# Read and return the content of the selected file
-		with open(os.path.join(CONFIG_PUB_DIR, selected_file), "r", encoding="utf8") as file:
-			return file.read()
-	except IOError:
-		return ""
+	
+	async def _get_groups(self):
+		try:
+			with open(self.config['groups_path'], 'a', encoding='utf8') as f:
+				async for dialog in self.client.iter_dialogs():
+					if dialog.is_group:
+						link = self.construct_telegram_link(dialog)
+						f.write(f'{dialog.id} - {dialog.title} - {link}\n')
+						self._logger(f"Found Group : {dialog.id} - {dialog.title} - {link}")
+			return True
+		except:
+			return False
 
-# Publication function
-async def publish(client, entities, total_time):
-	n = len(entities)
-	if n == 0:
-		return
+	async def _get_channels(self):
+		try:
+			with open(self.config['channels_path'], 'a', encoding='utf8') as f:
+				async for dialog in self.client.iter_dialogs():
+					if dialog.is_channel:
+						link = self.construct_telegram_link(dialog)
+						f.write(f"{dialog.id} - {dialog.title} - {link}\n")
+						self._logger(f"Found Channel : {dialog.id} - {dialog.title} - {link}")
+			return True
+		except Exception as e:
+			print(e)
+			return False
 
-	# Constants for Rate Limiting
-	MAX_MESSAGES_PER_MINUTE = 10  # Adjust as needed
-	RATE_LIMIT_DELAY = 60  # Delay in seconds when rate limit is hit
 
-	# Calculate average delay based on total time and number of entities
-	average_delay = total_time / n
-
-	# Widen the delay range for more variation
-	min_delay = 0.1  # Min delay is 10% of the average
-	max_delay = 1.9  # Max delay is 190% of the average
-
-	while True:
-		await asyncio.sleep(5)
-		start_time = time.time()
+	async def _load_messages(self):
+		self.messages = []
+		with open(self.config['messages_path'], 'r', encoding='utf8') as f:
+			links = f.readlines()
+			for link in links:
+				chat_id, message_id = await self._extract_from_url(link.strip())
+				message = await self.client.get_messages(chat_id, ids=message_id)
+				self.messages.append(message)
+	
+	async def _get_message(self):
+		return random.choice(self.messages)
+		
+	async def _publish(self, entities, total_time):
+		if not entities:
+			return False
+		n = len(entities)
+		average_delay = total_time / n
 		good, bad = 0, 0
-		for channel in entities:
-			# Get a new random message for each entity
-			message = get_message()
-
+		start_time = time.time()
+		for entity in entities:
+			message = await self._get_message()
 			elapsed_time = time.time() - start_time
-			remaining_time = max(total_time - elapsed_time, 0)
+			remaining_time = total_time - elapsed_time
 			entities_left = n - good - bad
 			average_delay = remaining_time / entities_left
-			delay = random.uniform(average_delay * min_delay, average_delay * max_delay)
-
-			if good > 0 and (good / (elapsed_time / 60)) > MAX_MESSAGES_PER_MINUTE:
-				await asyncio.sleep(RATE_LIMIT_DELAY)
-
+			delay = random.uniform(average_delay * self.MIN_DELAY, average_delay * self.MAX_DELAY)
+			if good > 0 and (good / (elapsed_time / 60)) > self.MAX_MESSAGES_PER_MINUTE:
+				await asyncio.sleep(self.RATE_LIMIT_DELAY)
+				remaining_time += self.RATE_LIMIT_DELAY
 			try:
-				entity = await client.get_entity(int(channel))
-				name = entity.username if hasattr(entity, 'username') and entity.username else f"[{getattr(entity, 'title', 'ID: ' + channel)}]"
-				formatting_entities = find_emojis(message, load_emoji_mappings(EMOJI_MAPPING))
-				await client.send_message(entity=entity, message=message, formatting_entities=formatting_entities)
+				if self.config['forward_header']:
+					await self.client.forward_messages(entity, message)
+				else:
+					await self.client.send_message(entity, message)
 				good += 1
+				self._logger(f"{remaining_time:.2f}s - Message sent to {entity.id} - [{good}:{bad}]")
 			except Exception as e:
-				print(e)
 				bad += 1
-			print_status(good, n, name)
+				print(e)
+				self._logger(f"{elapsed_time} - Failed to send message to {entity.id} - [{good}:{bad}]")
 
-			# Wait for a random time within the new range
+
 			if entities_left > 1:
 				await asyncio.sleep(delay)
+		return good, bad
+	
+	async def _handle_publish_command(self, command):
+		parts = command.split(" ")
+		if len(parts) != 3:
+			print(f"Usage : .pub <groups/channels> <time>")
+			return
+		try:
+			target_type = parts[1]
+			total_time = int(parts[2])
+		except:
+			print(f"Unknown command. Usage : .pub <groups/channels> <time>")
+			return
 
-# Print status
-def print_status(good, total, channel):
-	now = datetime.now().strftime("%H:%M:%S")
-	print(f"[{Col.cyan}{now}{Col.reset}] {COLA}[{Col.reset}*{COLA}]{Col.reset} Sending to {channel} Sent: {Col.cyan}{good}{Col.reset}/{total}{COLA}.{Col.reset}")
-
-# Time conversion
-def convert_time(time_str):
-	units = {'s': 1, 'm': 60, 'h': 3600}
-	try:
-		seconds = sum(int(part[:-1]) * units.get(part[-1], 0) for part in time_str.split() if part[:-1].isdigit() and part[-1] in units)
-		return seconds
-	except ValueError:
-		raise ValueError("Time format error. Please use the format like '2h30m' or '45s'.")
-
-
-# Main execution
-async def main():
-	display_banner()
-	api_id, api_hash = load_config()
-
-	if not api_id:
-		print_error("Edit config/account.txt with your API information.")
-		return
-
-	client = TelegramClient('session_name', api_id, api_hash)
-	await client.start()
-
-	while True:
-		command = get_input()
-
-		if command == ".exit":
-			break
-		elif command == ".account":
-			handle_account_command(api_id, api_hash)
-		elif command == '.channels':
-			await handle_channels_command(client)
-		elif command == '.groups':
-			await handle_groups_command(client)
-		elif command.startswith(".pub "):
-			await handle_publish_command(command, client)
-		elif command == ".join":
-			await join_groups_channels(client)
-		elif command == ".help":
-			display_help()
-
-def print_error(message):
-	print(f"\n{COLA}╔{Col.reset} {Col.cyan}{N4ME}{Col.reset} {COLA}${Col.reset}")
-	print(f"{COLA}╚{Col.reset} {message}{COLA}.{Col.reset}")
-
-
-def handle_account_command(api_id, api_hash):
-	print(f"\n{COLA}[{Col.reset}*{COLA}]{Col.reset} Saved Account:")
-	print(f"   API ID -> {api_id}")
-	print(f"   API HASH -> {api_hash}")
-
-def handle_channels_command(client):
-	if not get_channels(client):
-		print_error("Could not open config/channels.txt to get User Channels")
-
-async def handle_groups_command(client):
-	if not await get_groups(client):
-		print_error("Could not open config/channels.txt to get User Channels")
-
-async def handle_publish_command(command, client):
-	parts = command.split(" ")
-	if len(parts) != 3:
-		print_error("Invalid command format. Usage: .pub [target] [total_time]")
-		return
-
-	target_type = parts[1]
-	total_time = convert_time(parts[2])
-
-	entities = load_channels() if target_type == 'channels' else load_groups()
-
-	if not entities:
-		print_error(f"Could not open config/{target_type}.txt to get IDs")
-		return
-
-	print(f"\n{COLA}╔{Col.reset} {Col.cyan}{N4ME}{Col.reset} {COLA}${Col.reset}")
-	print(f"{COLA}║{Col.reset} Bot is ready. Target: {target_type.capitalize()} | Entities: {len(entities)} | Total Time: {total_time}s")
-	print(f"{COLA}╚{Col.reset} Press Enter to start{COLA}.{Col.reset} \n")
-	input()
-
-	await publish(client, entities, total_time)
-
-# Construct Telegram link
-def construct_telegram_link(dialog):
-	try:
-		if hasattr(dialog.entity, 'username') and dialog.entity.username:
-			return f'https://t.me/{dialog.entity.username}'
-		else:
-			# For private groups/channels without a username, use access_hash if available
-			if hasattr(dialog.entity, 'access_hash'):
-				return f'https://t.me/joinchat/{dialog.entity.access_hash}'
-			else:
-				return "No link available"
-	except AttributeError:
-		return "No link available"
-
-def print_channel_group_info(dialog, link):
-	print(f"{COLA}[{Col.reset}+{COLA}]{Col.reset} ID: {Col.cyan}{dialog.id}{Col.reset} Name: {Col.light_blue}{dialog.title}{Col.reset} Link: {Col.yellow}{link}{Col.reset}")
-
-def load_emoji_mappings(file_path):
-	"""Loads emoji mappings from a file and returns a dictionary."""
-	emoji_dict = {}
-	with open(file_path, 'r', encoding='utf-8') as file:
-		for line in file:
-			parts = line.strip().replace('\t', '').split(',')
-			if len(parts) == 2 and parts[1].strip().replace('\t', '').isdigit():
-				emoji, doc_id = parts[0].strip(), int(parts[1].strip())
-				emoji_dict[emoji] = doc_id
-	return emoji_dict
-
-def find_emojis(message, emoji_dict):
-	"""Finds emojis in the message and returns a list of custom emoji entities."""
-	entities = []
-	for emoji, doc_id in emoji_dict.items():
-		start = 0
-		while start < len(message):
-			pos = message.find(emoji, start)
-			if pos == -1:
+		entities = await self._load_channels() if target_type == 'channels' else await self._load_groups()
+		self._logger(f"Starting the bot.\nSending {len(self.messages)} messages to {len(entities)} {target_type}.")
+		input("Press Enter to start.")
+		while True:
+			try:
+				await asyncio.sleep(15)
+				await self._publish(entities, total_time)
+			except:
 				break
-			entity = types.MessageEntityCustomEmoji(offset=pos, length=len(emoji), document_id=doc_id)
-			entities.append(entity)
-			emoji_substr = message[pos:pos+len(emoji)]
-			start = pos + len(emoji)
-	return entities
+
+	
+	def _logger(self, command):
+		print(command)
 
 
+	async def run(self):
+		while True:
+			command = input(f">> ")
+			if command == ".exit":
+				break
+			elif command == ".channels":
+				await self._get_channels()
+			elif command == ".groups":
+				await self._get_groups()
+			elif ".pub" in command:
+				await self._handle_publish_command(command)
+			elif command == ".reload":
+				self._logger(f"Reloading config.")
+				await self._load_config(self.config_path)
+				await self._load_messages()
+			elif command == ".help" or command == "help":
+				print(self.HELP_MESSAGE)
 
-###############
+	
 
-
-import asyncio
-
-async def join_groups_channels(client):
-    tojoin_file = "config/tojoin.txt"
-    channels_file = CONFIG_CHANNELS_FILE
-    groups_file = CONFIG_GROUPS_FILE
-    rate_limit_wait = 191  # Adjust this based on the error message
-
-    try:
-        with open(tojoin_file, "r") as file:
-            links = [line.strip() for line in file if line.strip()]
-
-        for link in links:
-            try:
-                await client(JoinChannelRequest(link))
-                entity = await client.get_entity(link)
-                print(f"Joined {link}")
-
-                if getattr(entity, 'megagroup', False):
-                    write_to_file(groups_file, entity)
-                else:
-                    write_to_file(channels_file, entity)
-
-                links.remove(link)
-                await asyncio.sleep(rate_limit_wait)  # Wait to avoid rate limit
-
-            except Exception as e:
-                print(f"Could not join {link}: {e}")
-                await asyncio.sleep(rate_limit_wait)  # Wait and retry
-
-        # Update the tojoin.txt file
-        with open(tojoin_file, "w") as file:
-            file.writelines(link + '\n' for link in links)
-
-    except IOError:
-        print("Error reading or writing to the join list file.")
-
-
-def write_to_file(file_path, entity):
-	try:
-		with open(file_path, "a") as file:
-			link = construct_telegram_link(entity)
-			file.write(f'{entity.id} - {entity.title} - {link}\n')
-	except Exception as e:
-		print(f"Error writing to {file_path}: {e}")
+	async def _extract_from_url(self, url):
+		match = re.match(r'https://t\.me/(?:c/)?(\d+|[a-zA-Z0-9_]+)/(\d+)', url)
+		
+		if match:
+			chat_id = match.group(1)
+			message_id = int(match.group(2))
+			return chat_id, message_id
+		else:
+			print("URL does not match the expected Telegram message pattern.")
+			return None, None
+	
+	@staticmethod
+	def construct_telegram_link(dialog):
+		try:
+			if hasattr(dialog.entity, 'username') and dialog.entity.username:
+				return f'https://t.me/{dialog.entity.username}'
+			else:
+				# For private groups/channels without a username, use access_hash if available
+				if hasattr(dialog.entity, 'access_hash'):
+					return f'https://t.me/joinchat/{dialog.entity.access_hash}'
+				else:
+					return "No link available"
+		except AttributeError:
+			return "No link available"
+		
 
 
-def display_help():
-	print('''
-	HELP COMMANDS
-	-------------
+async def main():
+	spammer = await Spammer.init('./config/config.json')
+	await spammer.run()
 
-	.account    | see saved account
-	.channels   | load channels and save them
-	.groups		| load groups and save them
-	.pub <time> | start the bot with a delay, example: .pub 2h
-	''')
-
-
-if __name__ == "__main__":
+if __name__ == '__main__':
 	asyncio.run(main())
