@@ -122,7 +122,7 @@ class Spammer:
 		if not entities:
 			return False
 		n = len(entities)
-		total_time = n / self.MAX_MESSAGES_PER_MINUTE 
+		total_time = (n / self.MAX_MESSAGES_PER_MINUTE) * 60
 		average_delay = total_time / n
 		good, bad = 0, 0
 		start_time = time.time()
@@ -166,7 +166,6 @@ class Spammer:
 
 		entities = await self._load_channels() if target_type == 'channels' else await self._load_groups()
 		self._logger(f"Starting the bot.\nSending {len(self.messages)} messages to {len(entities)} {target_type}.")
-		input("Press Enter to start.")
 		while True:
 			try:
 				await self._publish(entities)
