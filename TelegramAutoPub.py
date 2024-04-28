@@ -7,15 +7,16 @@ from telethon import TelegramClient, types
 from telethon.tl.functions.channels import JoinChannelRequest
 
 class Spammer:
-	MAX_MESSAGES_PER_MINUTE = 10
+	MAX_MESSAGES_PER_MINUTE = 30
+	LOOP_DELAY = 720
 	RATE_LIMIT_DELAY = 60
+
 	MIN_DELAY = 0.1 # Min delay is 10% of the average
 	MAX_DELAY = 1.9 # Max delay is 190% of the average
 
 	HELP_MESSAGE = '''
 	HELP COMMANDS
 	_____________
-
 	.channels	| load channels and save them
 	.groups		| load groups and save them
 	.pub		| start the bot
@@ -57,7 +58,6 @@ class Spammer:
 				lines = f.readlines()
 				for line in lines:
 					line = line.split(' - ')[0].strip()
-					print(line)
 					try:
 						entity = await self.client.get_entity(int(line))
 					except Exception as e:
@@ -117,10 +117,12 @@ class Spammer:
 	async def _get_message(self):
 		return random.choice(self.messages)
 		
-	async def _publish(self, entities, total_time):
+	async def _publish(self, entities):
+		self._load_messages()
 		if not entities:
 			return False
 		n = len(entities)
+		total_time = n / self.MAX_MESSAGES_PER_MINUTE 
 		average_delay = total_time / n
 		good, bad = 0, 0
 		start_time = time.time()
@@ -144,7 +146,7 @@ class Spammer:
 			except Exception as e:
 				bad += 1
 				print(e)
-				self._logger(f"{elapsed_time} - Failed to send message to {entity.id} - [{good}:{bad}]")
+				self._logger(f"{elapsed_time:.2f} - Failed to send message to {entity.id} - [{good}:{bad}]")
 
 
 			if entities_left > 1:
@@ -153,14 +155,13 @@ class Spammer:
 	
 	async def _handle_publish_command(self, command):
 		parts = command.split(" ")
-		if len(parts) != 3:
-			print(f"Usage : .pub <groups/channels> <time>")
+		if len(parts) != 2:
+			print(f"Usage : .pub <groups/channels>")
 			return
 		try:
 			target_type = parts[1]
-			total_time = int(parts[2])
 		except:
-			print(f"Unknown command. Usage : .pub <groups/channels> <time>")
+			print(f"Unknown command. Usage : .pub <groups/channels>")
 			return
 
 		entities = await self._load_channels() if target_type == 'channels' else await self._load_groups()
@@ -168,8 +169,8 @@ class Spammer:
 		input("Press Enter to start.")
 		while True:
 			try:
-				await asyncio.sleep(15)
-				await self._publish(entities, total_time)
+				await self._publish(entities)
+				await asyncio.sleep(self.LOOP_DELAY)
 			except:
 				break
 
