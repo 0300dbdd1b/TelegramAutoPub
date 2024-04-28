@@ -118,7 +118,7 @@ class Spammer:
 		return random.choice(self.messages)
 		
 	async def _publish(self, entities):
-		self._load_messages()
+		await self._load_messages()
 		if not entities:
 			return False
 		n = len(entities)
